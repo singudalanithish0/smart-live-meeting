@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: smart-live-meeting-api
+    runtime: node
+    rootDir: server
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: MONGO_URI
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: CLIENT_URL
+        sync: false
+      - key: ADMIN_REGISTRATION_KEY
+        sync: false
+      - key: TRANSLATION_API_URL
+        value: https://libretranslate.com/translate
+      - key: TRANSLATION_API_KEY
+        sync: false
