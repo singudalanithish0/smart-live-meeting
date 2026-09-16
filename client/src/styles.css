@@ -1,0 +1,525 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: Inter, Arial, sans-serif;
+  background: #0f172a;
+  color: #e5e7eb;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+button {
+  border: 0;
+  border-radius: 8px;
+  padding: 10px 14px;
+  cursor: pointer;
+  background: #334155;
+  color: white;
+}
+
+button:hover {
+  opacity: 0.9;
+}
+
+.primary {
+  background: #2563eb;
+}
+
+.danger {
+  background: #dc2626;
+}
+
+.auth-page {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+}
+
+.auth-card,
+.join-card {
+  width: min(440px, 100%);
+  background: #1e293b;
+  padding: 30px;
+  border-radius: 16px;
+  box-shadow: 0 15px 50px rgba(0,0,0,.25);
+}
+
+.auth-card h1 {
+  margin-top: 0;
+}
+
+form {
+  display: grid;
+  gap: 10px;
+}
+
+input,
+select {
+  width: 100%;
+  padding: 11px 12px;
+  border-radius: 8px;
+  border: 1px solid #475569;
+  background: #0f172a;
+  color: white;
+}
+
+label {
+  margin-top: 6px;
+}
+
+.link-button {
+  background: transparent;
+  color: #93c5fd;
+  margin-top: 12px;
+}
+
+.muted {
+  color: #94a3b8;
+}
+
+.error {
+  margin-top: 14px;
+  padding: 10px;
+  border-radius: 8px;
+  background: #7f1d1d;
+}
+
+.info {
+  margin-top: 14px;
+  padding: 10px;
+  border-radius: 8px;
+  background: #164e63;
+}
+
+.app {
+  min-height: 100vh;
+}
+
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 18px 24px;
+  border-bottom: 1px solid #334155;
+  background: #111827;
+}
+
+header h1 {
+  margin: 0 0 4px;
+}
+
+.join-card {
+  margin: 80px auto;
+  display: grid;
+  gap: 14px;
+}
+
+.meeting-layout {
+  display: grid;
+  grid-template-columns: 1fr 340px;
+  min-height: calc(100vh - 90px);
+}
+
+.meeting-area {
+  padding: 18px;
+}
+
+.toolbar {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.toolbar-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.video-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+.video-card {
+  position: relative;
+  background: #020617;
+  border-radius: 12px;
+  overflow: hidden;
+  aspect-ratio: 16 / 9;
+}
+
+.video-card video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.video-card span {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  background: rgba(0,0,0,.7);
+  padding: 5px 8px;
+  border-radius: 6px;
+}
+
+.sidebar {
+  border-left: 1px solid #334155;
+  background: #111827;
+  padding: 18px;
+}
+
+.panel {
+  background: #1e293b;
+  padding: 14px;
+  border-radius: 10px;
+  margin-bottom: 14px;
+}
+
+.panel h3 {
+  margin-top: 0;
+}
+
+.alert {
+  padding: 8px 0;
+  border-bottom: 1px solid #334155;
+  font-size: 14px;
+}
+
+.subtitle-panel {
+  margin-top: 14px;
+  background: #111827;
+  border-radius: 12px;
+  padding: 14px;
+  max-height: 240px;
+  overflow: auto;
+}
+
+.subtitle-panel h3 {
+  margin-top: 0;
+}
+
+.subtitle-line {
+  padding: 8px 0;
+  border-bottom: 1px solid #334155;
+}
+
+@media (max-width: 900px) {
+  .meeting-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    border-left: 0;
+    border-top: 1px solid #334155;
+  }
+
+  .toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .toolbar-actions {
+    justify-content: flex-start;
+  }
+}
+/* =========================================
+   MAJOR PROJECT DASHBOARD
+========================================= */
+
+.dashboard {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 30px;
+  display: grid;
+  gap: 20px;
+}
+
+.dashboard-card {
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 16px;
+  padding: 24px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
+}
+
+.dashboard-card h2 {
+  margin-top: 0;
+}
+
+.user-list {
+  display: grid;
+  gap: 10px;
+}
+
+.user-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px;
+  padding: 16px;
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 10px;
+}
+
+.user-row button {
+  margin-left: 12px;
+}
+
+.user-row small {
+  display: block;
+  margin-top: 5px;
+  color: #60a5fa;
+  text-transform: uppercase;
+}
+
+@media (max-width: 700px) {
+
+  .dashboard {
+    padding: 15px;
+  }
+
+  .user-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+}
+
+/* ==========================================
+   PHASE 2 - ADMIN ALERTS
+========================================== */
+
+.admin-alert-container {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  width: 340px;
+  max-width: calc(100vw - 40px);
+  z-index: 9999;
+}
+
+.admin-alert {
+  background: #ffffff;
+  color: #222222;
+  padding: 18px;
+  margin-bottom: 12px;
+  border-radius: 12px;
+  border-left: 5px solid #e53935;
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.25);
+}
+
+.admin-alert h3 {
+  margin-top: 0;
+  margin-bottom: 10px;
+  color: #d32f2f;
+}
+
+.admin-alert p {
+  margin: 7px 0;
+}
+
+.admin-alert button {
+  margin-top: 10px;
+  padding: 8px 15px;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+
+/* ==========================================
+   PHASE 2 - CAMERA REMINDER
+========================================== */
+
+.camera-reminder {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+
+  width: 360px;
+  max-width: calc(100vw - 40px);
+
+  padding: 30px;
+
+  background: #ffffff;
+  color: #222222;
+
+  border-radius: 15px;
+
+  text-align: center;
+
+  box-shadow:
+    0 15px 40px rgba(0, 0, 0, 0.35);
+
+  z-index: 10000;
+}
+
+.camera-reminder-icon {
+  font-size: 50px;
+  margin-bottom: 10px;
+}
+
+.camera-reminder h2 {
+  margin: 10px 0;
+}
+
+.camera-reminder p {
+  line-height: 1.5;
+}
+
+.camera-reminder button {
+  margin-top: 15px;
+  padding: 10px 25px;
+  border: none;
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+
+/* ==========================================
+   PHASE 2 - ADMIN CAMERA CONTROL
+========================================== */
+
+.camera-control {
+  padding: 20px;
+  background: #ffffff;
+  color: #222222;
+  border-radius: 12px;
+  box-shadow:
+    0 5px 20px rgba(0, 0, 0, 0.15);
+}
+
+.camera-control h3 {
+  margin-top: 0;
+}
+
+.camera-control textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px;
+  border-radius: 7px;
+  border: 1px solid #cccccc;
+  resize: vertical;
+  margin-bottom: 10px;
+}
+
+.camera-control button {
+  padding: 10px 16px;
+  border: none;
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+
+/* ==========================================
+   PHASE 2 - SUBTITLES
+========================================== */
+
+.subtitle-panel {
+  position: fixed;
+
+  bottom: 20px;
+  left: 50%;
+
+  transform: translateX(-50%);
+
+  width: 70%;
+  max-width: 850px;
+
+  background: rgba(0, 0, 0, 0.88);
+  color: #ffffff;
+
+  padding: 15px;
+
+  border-radius: 12px;
+
+  z-index: 5000;
+
+  box-sizing: border-box;
+}
+
+.subtitle-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+
+  gap: 15px;
+}
+
+.subtitle-header h3 {
+  margin: 0;
+}
+
+.subtitle-header select {
+  padding: 8px;
+  border-radius: 6px;
+  border: none;
+}
+
+.subtitle-buttons {
+  display: flex;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.subtitle-buttons button {
+  padding: 8px 14px;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.subtitle-content {
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.subtitle-item {
+  padding: 5px 0;
+  line-height: 1.5;
+}
+
+.subtitle-empty {
+  opacity: 0.7;
+}
+
+
+/* ==========================================
+   MOBILE
+========================================== */
+
+@media (max-width: 700px) {
+
+  .subtitle-panel {
+    width: 90%;
+    bottom: 10px;
+  }
+
+  .subtitle-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .admin-alert-container {
+    width: 90%;
+    right: 5%;
+  }
+
+}
