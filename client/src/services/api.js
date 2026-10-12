@@ -1,13 +1,10 @@
-const API_URL =
-  import.meta.env.VITE_API_URL ||
-  "http://localhost:5000";
+const DEFAULT_API_URL = "http://localhost:5000";
 
-export async function apiRequest(
-  endpoint,
-  options = {}
-) {
-  const token =
-    localStorage.getItem("meetingToken");
+export const API_URL =
+  (import.meta.env.VITE_API_URL || DEFAULT_API_URL).replace(/\/$/, "");
+
+export async function apiRequest(endpoint, options = {}) {
+  const token = localStorage.getItem("meetingToken");
 
   const headers = {
     "Content-Type": "application/json",
@@ -15,34 +12,27 @@ export async function apiRequest(
   };
 
   if (token) {
-    headers.Authorization =
-      `Bearer ${token}`;
+    headers.Authorization = `Bearer ${token}`;
   }
 
-  const response = await fetch(
-    `${API_URL}${endpoint}`,
-    {
-      ...options,
-      headers
-    }
-  );
+  const response = await fetch(`${API_URL}${endpoint}`, {
+    ...options,
+    headers
+  });
 
-  let data = {};
-
-  try {
-    data = await response.json();
-  } catch {
-    data = {};
-  }
+  const contentType = response.headers.get("content-type") || "";
+  const data = contentType.includes("application/json")
+    ? await response.json()
+    : await response.text();
 
   if (!response.ok) {
-    throw new Error(
-      data.message ||
-      "Request failed"
-    );
+    const message =
+      typeof data === "string"
+        ? data
+        : data?.message || "Request failed";
+
+    throw new Error(message);
   }
 
   return data;
 }
-
-export { API_URL };

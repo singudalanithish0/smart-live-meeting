@@ -62,7 +62,10 @@ The frontend runs on `http://localhost:5173` and the backend runs on `http://loc
 - Deploy `client/` to Vercel with build command `npm run build` and output directory `dist`.
 - Deploy `server/` to a Node-compatible host such as Render, Railway, or Azure App Service.
 - Use MongoDB Atlas for the production database.
-- Set `VITE_API_URL` and `VITE_SOCKET_URL` to the public backend URL in the frontend deployment.
-- Set `CLIENT_URL` to the public frontend URL in the backend deployment.
+- Set `VITE_API_URL` and `VITE_SOCKET_URL` to the public backend URL in the frontend deployment, for example `https://smart-live-meeting-api.onrender.com`.
+- Set `CLIENT_URL` to the public frontend URL in the backend deployment. Multiple frontend URLs can be separated by commas.
+- After changing Vite environment variables, trigger a new frontend deployment because they are embedded during the build.
+
+The frontend cannot fetch meeting details from a GitHub repository or GitHub Pages by itself. The Node server must be deployed separately and its public HTTPS URL must be configured as `VITE_API_URL` and `VITE_SOCKET_URL` in the frontend host.
 
 Filename casing is intentional because production Linux hosts are case-sensitive.

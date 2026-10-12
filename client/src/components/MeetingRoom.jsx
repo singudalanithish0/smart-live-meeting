@@ -5,11 +5,20 @@ import React, {
 } from "react";
 
 import VisibilityMonitor from "./VisibilityMonitor";
+import SubtitlePanel from "../../components/SubtitlePanel";
+import ChatWindow from "./chat/ChatWindow";
+import ScreenShare from "./meeting/ScreenShare";
+import RecordingControls from "./meeting/RecordingControls";
+import AttendanceDashboard from "./dashboard/AttendanceDashboard";
+import MeetingChat from "./meeting/MeetingChat";
+import MeetingControls from "./meeting/MeetingControls";
+import VideoGrid from "./meeting/VideoGrid";
 
 export default function MeetingRoom({
   socket,
   user,
   meetingId,
+  cameraReminderMinutes = 5,
   onLeave
 }) {
   // ==========================================
@@ -39,6 +48,9 @@ export default function MeetingRoom({
   const [error, setError] =
     useState("");
 
+  const [cameraDeadlineMessage, setCameraDeadlineMessage] =
+    useState("");
+
   const [connected, setConnected] =
     useState(false);
 
@@ -46,6 +58,36 @@ export default function MeetingRoom({
     useState([]);
 
   const [remoteStreams, setRemoteStreams] = useState({});
+
+  useEffect(() => {
+    if (!socket || user?.role !== "participant") {
+      return undefined;
+    }
+
+    const handleCameraDeadlineReminder = (data = {}) => {
+      setCameraDeadlineMessage(
+        data.message || "Please turn on your camera."
+      );
+    };
+
+    socket.on(
+      "participant:camera-deadline-reminder",
+      handleCameraDeadlineReminder
+    );
+
+    return () => {
+      socket.off(
+        "participant:camera-deadline-reminder",
+        handleCameraDeadlineReminder
+      );
+    };
+  }, [socket, user?.role]);
+
+  useEffect(() => {
+    if (cameraOn) {
+      setCameraDeadlineMessage("");
+    }
+  }, [cameraOn]);
 
   // ==========================================
   // WEBRTC CONFIGURATION
@@ -55,13 +97,60 @@ export default function MeetingRoom({
     iceServers: [
       {
         urls: "stun:stun.l.google.com:19302"
-      }
+      },
+      {
+        urls: "stun:stun1.l.google.com:19302"
+      },
+      ...(import.meta.env.VITE_TURN_URL
+        ? [{
+            urls: import.meta.env.VITE_TURN_URL,
+            username: import.meta.env.VITE_TURN_USERNAME || "",
+            credential: import.meta.env.VITE_TURN_PASSWORD || ""
+          }]
+        : [])
     ]
   };
 
   // ==========================================
   // CREATE PEER CONNECTION
   // ==========================================
+
+  const syncLocalStreamWithPeers = (
+    stream = localStreamRef.current
+  ) => {
+    if (!stream) {
+      return;
+    }
+
+    Object.entries(
+      peerConnectionsRef.current
+    ).forEach(
+      ([remoteSocketId, peerConnection]) => {
+        stream.getTracks().forEach((track) => {
+          const senders =
+            peerConnection.getSenders();
+
+          const alreadyAdded = senders.some(
+            (sender) =>
+              sender.track?.kind === track.kind &&
+              sender.track?.id === track.id
+          );
+
+          if (!alreadyAdded) {
+            peerConnection.addTrack(
+              track,
+              stream
+            );
+          }
+        });
+
+        createOfferForPeer(
+          peerConnection,
+          remoteSocketId
+        );
+      }
+    );
+  };
 
   const createPeerConnection = (
     remoteSocketId,
@@ -342,6 +431,9 @@ export default function MeetingRoom({
         return;
       }
 
+      const shouldCreateOffer =
+        socket.id.localeCompare(participant.socketId) > 0;
+
       setRemoteParticipants(
         (previous) => {
           const exists =
@@ -363,11 +455,31 @@ export default function MeetingRoom({
       );
 
       // The existing participant creates
-      // the offer for the new participant.
+      // one deterministic offer to avoid glare.
       createPeerConnection(
         participant.socketId,
-        true
+        shouldCreateOffer
       );
+    };
+
+    const handleParticipantsList = (participants = []) => {
+      const otherParticipants = participants.filter(
+        (participant) => participant.socketId !== socket.id
+      );
+
+      setRemoteParticipants((current) => {
+        const knownSocketIds = new Set(current.map((item) => item.socketId));
+        return [
+          ...current,
+          ...otherParticipants.filter((item) => !knownSocketIds.has(item.socketId))
+        ];
+      });
+
+      otherParticipants.forEach((participant) => {
+        const shouldCreateOffer =
+          socket.id.localeCompare(participant.socketId) > 0;
+        createPeerConnection(participant.socketId, shouldCreateOffer);
+      });
     };
 
     // ========================================
@@ -544,6 +656,11 @@ export default function MeetingRoom({
     );
 
     socket.on(
+      "participants:list",
+      handleParticipantsList
+    );
+
+    socket.on(
       "webrtc:offer",
       handleOffer
     );
@@ -589,6 +706,11 @@ export default function MeetingRoom({
       socket.off(
         "participant:joined",
         handleParticipantJoined
+      );
+
+      socket.off(
+        "participants:list",
+        handleParticipantsList
       );
 
       socket.off(
@@ -639,6 +761,36 @@ export default function MeetingRoom({
   ]);
 
   // ==========================================
+  // MEDIA ACCESS CHECK
+  // ==========================================
+
+  const ensureMediaAccess = () => {
+    if (
+      !window.isSecureContext &&
+      !["localhost", "127.0.0.1"].includes(
+        window.location.hostname
+      )
+    ) {
+      setError(
+        "Camera and microphone access require a secure page. Please open the app through localhost or HTTPS."
+      );
+      return false;
+    }
+
+    if (
+      !navigator.mediaDevices ||
+      !navigator.mediaDevices.getUserMedia
+    ) {
+      setError(
+        "This browser does not support camera/microphone access."
+      );
+      return false;
+    }
+
+    return true;
+  };
+
+  // ==========================================
   // START CAMERA + MICROPHONE
   // ==========================================
 
@@ -646,65 +798,51 @@ export default function MeetingRoom({
     try {
       setError("");
 
-      // Prevent creating multiple streams
-      if (localStreamRef.current) {
+      if (!ensureMediaAccess()) {
+        return;
+      }
+
+      if (localStreamRef.current?.getVideoTracks().some((track) => track.readyState === "live")) {
         return;
       }
 
       const stream =
         await navigator.mediaDevices.getUserMedia(
           {
-            video: true,
-            audio: true
+            video: {
+              facingMode: "user"
+            },
+            audio: !localStreamRef.current
+              ?.getAudioTracks()
+              .some((track) => track.readyState === "live")
           }
         );
 
-      localStreamRef.current =
-        stream;
+      if (!localStreamRef.current) {
+        localStreamRef.current = stream;
+      } else {
+        stream.getTracks().forEach((track) => {
+          localStreamRef.current.addTrack(track);
+        });
+      }
 
       if (videoRef.current) {
         videoRef.current.srcObject =
-          stream;
+          localStreamRef.current;
       }
 
       setCameraOn(true);
-      setMicOn(true);
+      setMicOn(
+        localStreamRef.current
+          .getAudioTracks()
+          .some((track) => track.enabled && track.readyState === "live")
+      );
 
       // ========================================
       // ADD TRACKS TO EXISTING PEERS
       // ========================================
 
-      Object.entries(
-        peerConnectionsRef.current
-      ).forEach(
-        ([remoteSocketId, peerConnection]) => {
-          stream
-            .getTracks()
-            .forEach((track) => {
-              const senders =
-                peerConnection.getSenders();
-
-              const alreadyAdded =
-                senders.some(
-                  (sender) =>
-                    sender.track?.kind ===
-                    track.kind
-                );
-
-              if (!alreadyAdded) {
-                peerConnection.addTrack(
-                  track,
-                  stream
-                );
-              }
-            });
-
-          createOfferForPeer(
-            peerConnection,
-            remoteSocketId
-          );
-        }
-      );
+      syncLocalStreamWithPeers(localStreamRef.current);
 
       // ========================================
       // CAMERA STATUS
@@ -759,7 +897,10 @@ export default function MeetingRoom({
   // CAMERA TOGGLE
   // ==========================================
 const toggleCamera = async () => {
-  // ========================================
+    if (!ensureMediaAccess()) {
+      return;
+    }
+
   // CAMERA IS CURRENTLY ON → TURN IT OFF
   // ========================================
 
@@ -858,38 +999,8 @@ const toggleCamera = async () => {
     // ADD CAMERA TO EXISTING PEERS
     // ========================================
 
-    Object.entries(
-      peerConnectionsRef.current
-    ).forEach(
-      ([remoteSocketId, peerConnection]) => {
-
-        newStream
-          .getVideoTracks()
-          .forEach((track) => {
-
-            const senders =
-              peerConnection.getSenders();
-
-            const alreadyAdded =
-              senders.some(
-                (sender) =>
-                  sender.track?.kind ===
-                  "video"
-              );
-
-            if (!alreadyAdded) {
-              peerConnection.addTrack(
-                track,
-                localStreamRef.current
-              );
-            }
-          });
-
-        createOfferForPeer(
-          peerConnection,
-          remoteSocketId
-        );
-      }
+    syncLocalStreamWithPeers(
+      localStreamRef.current
     );
 
     // ========================================
@@ -944,23 +1055,51 @@ const toggleCamera = async () => {
   // MICROPHONE TOGGLE
   // ==========================================
 
-  const toggleMic = () => {
-    const stream =
-      localStreamRef.current;
-
-    if (!stream) {
+  const toggleMic = async () => {
+    if (!ensureMediaAccess()) {
       return;
     }
 
-    const audioTracks =
-      stream.getAudioTracks();
+    let stream = localStreamRef.current;
+    let audioTracks = stream?.getAudioTracks() || [];
+    let acquiredMicrophone = false;
 
-    if (audioTracks.length === 0) {
-      return;
+    if (!audioTracks.some((track) => track.readyState === "live")) {
+      try {
+        setError("");
+        const microphoneStream =
+          await navigator.mediaDevices.getUserMedia({
+            audio: true,
+            video: false
+          });
+        const microphoneTracks = microphoneStream.getAudioTracks();
+
+        if (!stream) {
+          stream = new MediaStream();
+          localStreamRef.current = stream;
+        }
+
+        microphoneTracks.forEach((track) => stream.addTrack(track));
+        audioTracks = microphoneTracks;
+        acquiredMicrophone = true;
+      } catch (err) {
+        console.error("Microphone access error:", err.name, err.message, err);
+
+        if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
+          setError("Microphone access was blocked. Please allow microphone access in your browser.");
+        } else if (err.name === "NotReadableError") {
+          setError("The microphone is being used by another application or browser tab.");
+        } else if (err.name === "NotFoundError") {
+          setError("No microphone was found on this device.");
+        } else {
+          setError(`Microphone error: ${err.name || "Unknown error"} - ${err.message || "Unknown problem"}`);
+        }
+        return;
+      }
     }
 
     const newState =
-      !audioTracks[0].enabled;
+      acquiredMicrophone || audioTracks.some((track) => !track.enabled);
 
     audioTracks.forEach(
       (track) => {
@@ -970,6 +1109,10 @@ const toggleCamera = async () => {
     );
 
     setMicOn(newState);
+
+    if (acquiredMicrophone) {
+      syncLocalStreamWithPeers(stream);
+    }
   };
 
   // ==========================================
@@ -1118,103 +1261,44 @@ const toggleCamera = async () => {
             : "🔴 Disconnected from meeting server"}
         </div>
 
-        {/* VIDEO GRID */}
-
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns:
-              "repeat(auto-fit, minmax(300px, 1fr))",
-            gap: "20px"
-          }}
-        >
-          {/* LOCAL VIDEO */}
-
-          <div
-            style={{
-              background: "#000",
-              borderRadius: "10px",
-              overflow: "hidden"
-            }}
-          >
+          {user?.role === "participant" && cameraReminderMinutes > 0 && (
             <div
               style={{
+                marginBottom: "15px",
                 padding: "10px",
-                background: "#374151"
+                borderRadius: "8px",
+                background: "#1e3a5f"
               }}
             >
-              You -{" "}
-              {user?.name ||
-                "Participant"}
+              Turn on your camera at least once within{" "}
+              {cameraReminderMinutes} minute
+              {cameraReminderMinutes === 1 ? "" : "s"} of joining.
             </div>
-
-            <video
-              ref={videoRef}
-              autoPlay
-              playsInline
-              muted
-              style={{
-                width: "100%",
-                height: "300px",
-                background: "black",
-                objectFit: "cover"
-              }}
-            />
-          </div>
-
-          {/* REMOTE PARTICIPANTS */}
-
-          {remoteParticipants.map(
-            (participant) => (
-              <div
-                key={
-                  participant.socketId
-                }
-                style={{
-                  background: "#000",
-                  borderRadius: "10px",
-                  overflow: "hidden"
-                }}
-              >
-                <div
-                  style={{
-                    padding: "10px",
-                    background: "#374151"
-                  }}
-                >
-                  {participant.name ||
-                    "Participant"}
-                </div>
-
-                <video
-                  ref={(element) => {
-                    if (element) {
-                      remoteVideosRef.current[
-                        participant.socketId
-                      ] = element;
-
-                      const stream =
-                        remoteStreams[participant.socketId];
-
-                      if (stream) {
-                        element.srcObject = stream;
-                        element.play().catch(() => {});
-                      }
-                    }
-                  }}
-                  autoPlay
-                  playsInline
-                  style={{
-                    width: "100%",
-                    height: "300px",
-                    background: "black",
-                    objectFit: "cover"
-                  }}
-                />
-              </div>
-            )
           )}
-        </div>
+
+          {cameraDeadlineMessage && (
+            <div
+              role="alert"
+              style={{
+                marginBottom: "15px",
+                padding: "12px",
+                borderRadius: "8px",
+                background: "#7f1d1d"
+              }}
+            >
+              {cameraDeadlineMessage}
+            </div>
+          )}
+
+          {/* VIDEO GRID */}
+
+        <VideoGrid
+          localVideoRef={videoRef}
+          remoteParticipants={remoteParticipants}
+          remoteVideosRef={remoteVideosRef}
+          remoteStreams={remoteStreams}
+          user={user}
+        />
 
         {/* NO REMOTE PARTICIPANTS */}
 
@@ -1249,42 +1333,43 @@ const toggleCamera = async () => {
 
         {/* CONTROLS */}
 
+        <div style={{ marginTop: "20px" }}>
+          <MeetingControls
+            cameraOn={cameraOn}
+            micOn={micOn}
+            onStartCamera={startCamera}
+            onToggleCamera={toggleCamera}
+            onToggleMic={toggleMic}
+            onLeave={leaveMeeting}
+          />
+
+          <div style={{ display: "flex", justifyContent: "center", gap: "12px", marginTop: "12px", flexWrap: "wrap" }}>
+            <ScreenShare socket={socket} meetingId={meetingId} user={user} />
+            <RecordingControls socket={socket} meetingId={meetingId} user={user} />
+          </div>
+        </div>
+
         <div
           style={{
-            display: "flex",
-            justifyContent: "center",
-            gap: "15px",
             marginTop: "20px",
-            flexWrap: "wrap"
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+            gap: "20px"
           }}
         >
-          <button
-            onClick={startCamera}
-          >
-            🎥 Start Camera
-          </button>
+          <MeetingChat socket={socket} meetingId={meetingId} user={user} />
+          <AttendanceDashboard participants={remoteParticipants} />
+        </div>
 
-          <button
-            onClick={toggleCamera}
-          >
-            {cameraOn
-              ? "📹 Turn Camera Off"
-              : "📹 Turn Camera On"}
-          </button>
-
-          <button
-            onClick={toggleMic}
-          >
-            {micOn
-              ? "🎤 Mute Microphone"
-              : "🎤 Unmute Microphone"}
-          </button>
-
-          <button
-            onClick={leaveMeeting}
-          >
-            🚪 Leave Meeting
-          </button>
+        <div
+          style={{
+            marginTop: "20px"
+          }}
+        >
+          <SubtitlePanel
+            socket={socket}
+            meetingId={meetingId}
+          />
         </div>
 
         {/* STATUS */}

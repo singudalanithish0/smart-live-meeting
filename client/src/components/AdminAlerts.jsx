@@ -10,36 +10,63 @@ export default function AdminAlerts({
       return;
     }
 
-    const handleVisibilityAlert = (data) => {
-      console.log(
-        "Admin visibility alert:",
-        data
-      );
+    const alertTimers = new Map();
 
+    const handleVisibilityAlert = (data) => {
+      const id = `${Date.now()}-${Math.random()}`;
       setAlerts((previous) => [
         {
-          id: Date.now(),
+          id,
           type: "visibility",
           ...data
         },
         ...previous
       ]);
+      alertTimers.set(
+        id,
+        window.setTimeout(() => {
+          setAlerts((previous) => previous.filter((alert) => alert.id !== id));
+          alertTimers.delete(id);
+        }, 3000)
+      );
     };
 
     const handleCameraAlert = (data) => {
-      console.log(
-        "Admin camera alert:",
-        data
-      );
-
+      const id = `${Date.now()}-${Math.random()}`;
       setAlerts((previous) => [
         {
-          id: Date.now(),
+          id,
           type: "camera",
           ...data
         },
         ...previous
       ]);
+      alertTimers.set(
+        id,
+        window.setTimeout(() => {
+          setAlerts((previous) => previous.filter((alert) => alert.id !== id));
+          alertTimers.delete(id);
+        }, 3000)
+      );
+    };
+
+    const handleCameraDeadlineAlert = (data) => {
+      const id = `${Date.now()}-${Math.random()}`;
+      setAlerts((previous) => [
+        {
+          id,
+          type: "camera-deadline",
+          ...data
+        },
+        ...previous
+      ]);
+      alertTimers.set(
+        id,
+        window.setTimeout(() => {
+          setAlerts((previous) => previous.filter((alert) => alert.id !== id));
+          alertTimers.delete(id);
+        }, 3000)
+      );
     };
 
     socket.on(
@@ -52,6 +79,11 @@ export default function AdminAlerts({
       handleCameraAlert
     );
 
+    socket.on(
+      "admin:camera-deadline-alert",
+      handleCameraDeadlineAlert
+    );
+
     return () => {
       socket.off(
         "admin:visibility-alert",
@@ -62,16 +94,13 @@ export default function AdminAlerts({
         "admin:camera-off-alert",
         handleCameraAlert
       );
+      socket.off(
+        "admin:camera-deadline-alert",
+        handleCameraDeadlineAlert
+      );
+      alertTimers.forEach((timer) => window.clearTimeout(timer));
     };
   }, [socket]);
-
-  const removeAlert = (id) => {
-    setAlerts((previous) =>
-      previous.filter(
-        (alert) => alert.id !== id
-      )
-    );
-  };
 
   if (alerts.length === 0) {
     return null;
@@ -97,14 +126,20 @@ export default function AdminAlerts({
                 <strong>
                   {alert.name || "Participant"}
                 </strong>{" "}
-                changed meeting visibility.
+                {alert.visible
+                  ? "returned to the meeting tab."
+                  : "switched away from the meeting tab."}
               </p>
 
+              <p>Status: {alert.visible ? "Meeting tab is visible" : "Meeting tab is hidden"}</p>
+            </>
+          ) : alert.type === "camera-deadline" ? (
+            <>
+              <h3>📷 Camera Requirement Missed</h3>
               <p>
-                Status:{" "}
-                {alert.visible
-                  ? "Meeting visible"
-                  : "Tab changed / Meeting hidden"}
+                <strong>{alert.name || "Participant"}</strong> did not turn on
+                their camera within {alert.reminderMinutes} minute
+                {alert.reminderMinutes === 1 ? "" : "s"}.
               </p>
             </>
           ) : (
@@ -122,14 +157,6 @@ export default function AdminAlerts({
               </p>
             </>
           )}
-
-          <button
-            onClick={() =>
-              removeAlert(alert.id)
-            }
-          >
-            Dismiss
-          </button>
 
         </div>
 

@@ -11,13 +11,18 @@ import {
   getCurrentUser
 } from "./services/auth";
 
-import { apiRequest } from "./services/api";
+import {
+  apiRequest,
+  API_URL
+} from "./services/api";
 
-import { io } from "socket.io-client";
 import MeetingRoom from "./components/MeetingRoom";
-
-import AdminAlerts
-  from "./components/AdminAlerts";
+import AdminAlerts from "./components/AdminAlerts";
+import AdminDashboard from "./pages/AdminDashboard";
+import Dashboard from "./pages/Dashboard";
+import Login from "./pages/Login";
+import MeetingPage from "./pages/Meeting";
+import { createSocketConnection, attachSocketDebugHandlers } from "./services/socket";
 
 
 
@@ -46,6 +51,9 @@ export default function App() {
 
     const [joinedMeeting, setJoinedMeeting] =
   useState(null);
+
+    const [pendingMeeting, setPendingMeeting] =
+    useState(null);
 
     const [meetingCode, setMeetingCode] =
   useState("");
@@ -114,6 +122,9 @@ const [meetings, setMeetings] =
 const [meetingTitle, setMeetingTitle] =
   useState("");
 
+const [cameraReminderMinutes, setCameraReminderMinutes] =
+  useState(5);
+
 const [meetingLoading, setMeetingLoading] =
   useState(false);
 
@@ -152,59 +163,13 @@ const [activeMeeting, setActiveMeeting] =
     );
 
 
-    const newSocket = io(
-      import.meta.env.VITE_SOCKET_URL ||
-      "http://localhost:5000",
-      {
-        withCredentials: true
-      }
-    );
+    const newSocket = createSocketConnection({ user });
 
+    if (!newSocket) {
+      return;
+    }
 
-    // Socket connected
-
-    newSocket.on(
-      "connect",
-      () => {
-
-        console.log(
-          "Socket.IO connected:",
-          newSocket.id
-        );
-
-      }
-    );
-
-
-    // Socket disconnected
-
-    newSocket.on(
-      "disconnect",
-      () => {
-
-        console.log(
-          "Socket.IO disconnected"
-        );
-
-      }
-    );
-
-
-    // Socket connection error
-
-    newSocket.on(
-      "connect_error",
-      (error) => {
-
-        console.error(
-          "Socket.IO connection error:",
-          error.message
-        );
-
-      }
-    );
-
-
+    attachSocketDebugHandlers(newSocket);
     setSocket(newSocket);
 
 
@@ -222,7 +187,75 @@ const [activeMeeting, setActiveMeeting] =
 
     };
 
-  }, [user]);
+  }, [user?.id, user?._id]);
+
+  useEffect(() => {
+    if (!pendingMeeting?.meetingId) return undefined;
+
+    let active = true;
+
+    const checkApproval = async () => {
+      try {
+        const data = await apiRequest(
+          `/api/meetings/${pendingMeeting.meetingId}/access`
+        );
+
+        if (!active) return;
+
+        if (data.approvalStatus === "approved") {
+          setJoinedMeeting(pendingMeeting);
+          setPendingMeeting(null);
+          setShowMeeting(true);
+        } else if (data.approvalStatus === "rejected") {
+          setPendingMeeting(null);
+          setError("The administrator rejected your request to join.");
+        }
+      } catch (error) {
+        if (active) setError(error.message);
+      }
+    };
+
+    checkApproval();
+    const interval = window.setInterval(checkApproval, 2000);
+
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
+  }, [pendingMeeting]);
+
+  useEffect(() => {
+    if (user?.role !== "admin") return undefined;
+
+    let active = true;
+    let loadingMeetings = false;
+
+    const refreshMeetings = async () => {
+      if (loadingMeetings) return;
+      loadingMeetings = true;
+
+      try {
+        const data = await apiRequest("/api/meetings/admin");
+        if (active) {
+          setMeetings(data.meetings || []);
+        }
+      } catch (error) {
+        if (active) {
+          setError(error.message);
+        }
+      } finally {
+        loadingMeetings = false;
+      }
+    };
+
+    refreshMeetings();
+    const interval = window.setInterval(refreshMeetings, 3000);
+
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
+  }, [user?.role]);
 
 
   // ===================================================
@@ -237,10 +270,13 @@ const [activeMeeting, setActiveMeeting] =
 
     }
 
+    let isActive = true;
 
     getCurrentUser()
 
       .then((data) => {
+
+        if (!isActive) return;
 
         setUser(normalizeUser(data.user));
 
@@ -248,11 +284,17 @@ const [activeMeeting, setActiveMeeting] =
 
       .catch(() => {
 
+        if (!isActive) return;
+
         logout();
 
       });
 
-  }, [user]);
+    return () => {
+      isActive = false;
+    };
+
+  }, [user?.id, user?._id]);
 
 
   // ===================================================
@@ -370,9 +412,12 @@ async function handleJoinMeeting() {
   );
 }
 
-setJoinedMeeting(data.meeting);
-
-setShowMeeting(true);
+    if (data.approvalStatus === "approved") {
+      setJoinedMeeting(data.meeting);
+      setShowMeeting(true);
+    } else {
+      setPendingMeeting(data.meeting);
+    }
 
   } catch (error) {
 
@@ -400,6 +445,7 @@ setShowMeeting(true);
     setShowMeeting(false);
     setActiveMeeting(null);
     setJoinedMeeting(null);
+    setPendingMeeting(null);
 
   }
 
@@ -456,7 +502,7 @@ async function createMeeting() {
         body: JSON.stringify({
           title: meetingTitle.trim(),
           cameraReminderEnabled: true,
-          cameraReminderMinutes: 5
+          cameraReminderMinutes: Number(cameraReminderMinutes)
         })
       }
     );
@@ -570,6 +616,34 @@ async function endMeeting(meetingId) {
   }
 }
 
+async function updateParticipantApproval(meetingId, participantId, approvalStatus) {
+  try {
+    const data = await apiRequest(
+      `/api/meetings/${meetingId}/participants/${participantId}/approval`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ approvalStatus })
+      }
+    );
+
+    setMeetings((current) =>
+      current.map((meeting) =>
+        meeting.meetingId === meetingId ? data.meeting : meeting
+      )
+    );
+  } catch (error) {
+    setError(error.message);
+  }
+}
+
+const pendingJoinRequests = activeMeeting
+  ? meetings
+      .find((meeting) => meeting.meetingId === activeMeeting.meetingId)
+      ?.participants?.filter(
+        (participant) => participant.approvalStatus === "pending"
+      ) || []
+  : [];
+
 
 // ===================================================
 // COPY MEETING CODE
@@ -653,250 +727,20 @@ async function copyMeetingCode(meetingId) {
   // ===================================================
 
   if (!user) {
-
     return (
-
-      <div className="auth-page">
-
-        <div className="auth-card">
-
-          <h1>
-            Smart Live Meeting
-          </h1>
-
-
-          <p className="muted">
-            Real-time intelligent
-            meeting platform
-          </p>
-
-
-          <form
-            onSubmit={handleAuth}
-          >
-
-            {/* NAME */}
-
-            {mode === "register" && (
-
-              <>
-
-                <label>
-                  Name
-                </label>
-
-
-                <input
-                  value={form.name}
-
-                  onChange={(event) =>
-                    setForm({
-                      ...form,
-                      name:
-                        event.target.value
-                    })
-                  }
-
-                  required
-                />
-
-              </>
-
-            )}
-
-
-            {/* EMAIL */}
-
-            <label>
-              Email
-            </label>
-
-
-            <input
-              type="email"
-
-              value={form.email}
-
-              onChange={(event) =>
-                setForm({
-                  ...form,
-                  email:
-                    event.target.value
-                })
-              }
-
-              required
-            />
-
-
-            {/* PASSWORD */}
-
-            <label>
-              Password
-            </label>
-
-
-            <input
-              type="password"
-
-              value={form.password}
-
-              onChange={(event) =>
-                setForm({
-                  ...form,
-                  password:
-                    event.target.value
-                })
-              }
-
-              required
-
-              minLength={6}
-            />
-
-
-            {/* REGISTRATION OPTIONS */}
-
-            {mode === "register" && (
-
-              <>
-
-                <label>
-                  Account Type
-                </label>
-
-
-                <select
-
-                  value={form.role}
-
-                  onChange={(event) =>
-                    setForm({
-                      ...form,
-                      role:
-                        event.target.value
-                    })
-                  }
-
-                >
-
-                  <option value="participant">
-                    Participant
-                  </option>
-
-
-                  <option value="admin">
-                    Administrator
-                  </option>
-
-                </select>
-
-
-                {/* ADMIN KEY */}
-
-                {form.role === "admin" && (
-
-                  <>
-
-                    <label>
-                      Admin Registration Key
-                    </label>
-
-
-                    <input
-                      type="password"
-
-                      value={
-                        form.adminKey
-                      }
-
-                      onChange={(event) =>
-                        setForm({
-                          ...form,
-                          adminKey:
-                            event.target.value
-                        })
-                      }
-
-                      required
-                    />
-
-                  </>
-
-                )}
-
-              </>
-
-            )}
-
-
-            {/* LOGIN BUTTON */}
-
-            <button
-
-              className="primary"
-
-              disabled={loading}
-
-            >
-
-              {loading
-                ? "Please wait..."
-                : mode === "login"
-                ? "Login"
-                : "Create Account"}
-
-            </button>
-
-          </form>
-
-
-          {/* ERROR */}
-
-          {error && (
-
-            <div className="error">
-
-              {error}
-
-            </div>
-
-          )}
-
-
-          {/* SWITCH LOGIN / REGISTER */}
-
-          <button
-
-            className="link-button"
-
-            onClick={() => {
-
-              setMode(
-                mode === "login"
-                  ? "register"
-                  : "login"
-              );
-
-              setError("");
-
-            }}
-
-          >
-
-            {mode === "login"
-              ? "Create a new account"
-              : "Already have an account? Login"}
-
-          </button>
-
-
-        </div>
-
-      </div>
-
+      <Login
+        mode={mode}
+        setMode={(nextMode) => {
+          setMode(nextMode);
+          setError("");
+        }}
+        form={form}
+        setForm={setForm}
+        handleAuth={handleAuth}
+        loading={loading}
+        error={error}
+      />
     );
-
   }
 
 
@@ -911,19 +755,72 @@ async function copyMeetingCode(meetingId) {
   ) {
 
     return (
-
-      <MeetingRoom
-        socket={socket}
-        user={user}
-        meetingId={
-          activeMeeting.meetingId
-        }
-        onLeave={() => {
-          setShowMeeting(false);
-          setActiveMeeting(null);
-        }}
-      />
-
+      <>
+        <AdminAlerts socket={socket} />
+        <MeetingPage
+          socket={socket}
+          user={user}
+          meetingId={activeMeeting.meetingId}
+          cameraReminderMinutes={activeMeeting.cameraReminderMinutes}
+          onLeave={() => {
+            setShowMeeting(false);
+            setActiveMeeting(null);
+          }}
+        />
+        {pendingJoinRequests.length > 0 && (
+          <div className="join-request-backdrop">
+            <section
+              className="join-request-dialog"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="join-request-title"
+            >
+              <h2 id="join-request-title">Participant requesting to join</h2>
+              <p className="muted">
+                {pendingJoinRequests.length === 1
+                  ? "A participant is waiting for your approval."
+                  : `${pendingJoinRequests.length} participants are waiting for your approval.`}
+              </p>
+              <div className="join-request-list">
+                {pendingJoinRequests.map((participant) => (
+                  <div
+                    className="join-request-row"
+                    key={participant.userId}
+                  >
+                    <strong>{participant.name || "Participant"}</strong>
+                    <div>
+                      <button
+                        className="primary"
+                        onClick={() =>
+                          updateParticipantApproval(
+                            activeMeeting.meetingId,
+                            participant.userId,
+                            "approved"
+                          )
+                        }
+                      >
+                        Approve
+                      </button>
+                      <button
+                        className="danger"
+                        onClick={() =>
+                          updateParticipantApproval(
+                            activeMeeting.meetingId,
+                            participant.userId,
+                            "rejected"
+                          )
+                        }
+                      >
+                        Reject
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          </div>
+        )}
+      </>
     );
 
   }
@@ -934,310 +831,29 @@ async function copyMeetingCode(meetingId) {
   // ===================================================
 
   if (user.role === "admin") {
-
     return (
-
-      <div className="app">
-
-        {/* ADMIN ALERTS */}
-
-        <AdminAlerts
-          socket={socket}
-        />
-
-
-        {/* HEADER */}
-
-        <header>
-
-          <div>
-
-            <h1>
-              Smart Live Meeting
-            </h1>
-
-
-            <span className="muted">
-
-              Administrator ·{" "}
-
-              {user.name}
-
-            </span>
-
-          </div>
-
-
-          <button
-            onClick={logout}
-          >
-            Logout
-          </button>
-
-        </header>
-
-
-        {/* DASHBOARD */}
-
-        <main className="dashboard">
-
-
-          {/* ADMIN INFORMATION */}
-
-          <div className="dashboard-card">
-
-            <h2>
-              Admin Dashboard
-            </h2>
-
-
-            <p>
-              Manage participants,
-              meetings and monitoring.
-            </p>
-
-
-            <button
-
-              className="primary"
-
-              onClick={loadUsers}
-
-            >
-
-              Load Participants
-
-            </button>
-
-          </div>
-
-{/* CREATE MEETING */}
-
-<div className="dashboard-card">
-
-  <h2>
-    Create New Meeting
-  </h2>
-
-  <p className="muted">
-    Create a meeting and share the joining
-    code with participants.
-  </p>
-
-  <input
-    type="text"
-    placeholder="Enter meeting title"
-    value={meetingTitle}
-    onChange={(event) =>
-      setMeetingTitle(event.target.value)
-    }
-  />
-
-  <button
-    className="primary"
-    onClick={createMeeting}
-    disabled={meetingLoading}
-  >
-    {meetingLoading
-      ? "Creating..."
-      : "Create Meeting"}
-  </button>
-
-</div>
-
-
-{/* MY MEETINGS */}
-
-<div className="dashboard-card">
-
-  <h2>
-    My Meetings
-  </h2>
-
-  <button onClick={loadMeetings}>
-    Load Meetings
-  </button>
-
-  {meetings.length === 0 ? (
-
-    <p className="muted">
-      No meetings created yet.
-    </p>
-
-  ) : (
-
-    <div className="user-list">
-
-      {meetings.map((meeting) => (
-
-        <div
-          className="user-row"
-          key={meeting._id}
-        >
-
-          <div>
-
-            <strong>
-              {meeting.title}
-            </strong>
-
-            <div className="muted">
-              Meeting Code:{" "}
-              <strong>
-                {meeting.joinCode}
-              </strong>
-            </div>
-
-            <small>
-              Status: {meeting.status}
-            </small>
-
-          </div>
-
-          <div>
-
-            <button
-              onClick={() =>
-                copyMeetingCode(
-                 meeting.joinCode
-                )
-              }
-            >
-              Copy Code
-            </button>
-
-            {meeting.status === "scheduled" && (
-              <button
-                onClick={() =>
-                  startMeeting(
-                    meeting.meetingId
-                  )
-                }
-              >
-                Start Meeting
-              </button>
-            )}
-
-            {meeting.status === "active" && (
-              <button
-                onClick={() =>
-                  endMeeting(
-                    meeting.meetingId
-                  )
-                }
-              >
-                End Meeting
-              </button>
-            )}
-
-          </div>
-
-        </div>
-
-      ))}
-
-    </div>
-
-  )}
-
-</div>
-
-          {/* REGISTERED USERS */}
-
-          <div className="dashboard-card">
-
-            <h2>
-              Registered Users
-            </h2>
-
-
-            {users.length === 0 ? (
-
-              <p className="muted">
-                Click "Load Participants".
-              </p>
-
-            ) : (
-
-              <div className="user-list">
-
-                {users.map((item) => (
-
-                  <div
-
-                    className="user-row"
-
-                    key={item._id}
-
-                  >
-
-                    <div>
-
-                      <strong>
-                        {item.name}
-                      </strong>
-
-
-                      <div className="muted">
-                        {item.email}
-                      </div>
-
-
-                      <small>
-                        {item.role}
-                      </small>
-
-                    </div>
-
-
-                    <div>
-
-                      <span>
-
-                        {item.isActive
-                          ? "🟢 Active"
-                          : "🔴 Disabled"}
-
-                      </span>
-
-
-                      {(item.id || item._id) !== (user?.id || user?._id) && (
-
-                        <button
-
-                          onClick={() =>
-                            toggleUser(item)
-                          }
-
-                        >
-
-                          {item.isActive
-                            ? "Disable"
-                            : "Enable"}
-
-                        </button>
-
-                      )}
-
-                    </div>
-
-                  </div>
-
-                ))}
-
-              </div>
-
-            )}
-
-          </div>
-
-
-        </main>
-
-      </div>
-
+      <AdminDashboard
+        user={user}
+        socket={socket}
+        users={users}
+        meetings={meetings}
+        meetingTitle={meetingTitle}
+        setMeetingTitle={setMeetingTitle}
+        cameraReminderMinutes={cameraReminderMinutes}
+        setCameraReminderMinutes={setCameraReminderMinutes}
+        meetingLoading={meetingLoading}
+        createMeeting={createMeeting}
+        loadUsers={loadUsers}
+        loadMeetings={loadMeetings}
+        copyMeetingCode={copyMeetingCode}
+        startMeeting={startMeeting}
+        endMeeting={endMeeting}
+        updateParticipantApproval={updateParticipantApproval}
+        toggleUser={toggleUser}
+        logout={logout}
+        error={error}
+      />
     );
-
   }
 
 
@@ -1247,28 +863,38 @@ async function copyMeetingCode(meetingId) {
 
   if (
     user.role === "participant" &&
+    pendingMeeting &&
+    !showMeeting
+  ) {
+    return (
+      <Dashboard
+        user={user}
+        pendingMeeting={pendingMeeting}
+        meetingCode={meetingCode}
+        setMeetingCode={setMeetingCode}
+        handleJoinMeeting={handleJoinMeeting}
+        joiningMeeting={joiningMeeting}
+        logout={logout}
+      />
+    );
+  }
+
+  if (
+    user.role === "participant" &&
     showMeeting
   ) {
 
     return (
-
-      <MeetingRoom
-
-  socket={socket}
-
-  user={user}
-
-  meetingId={
-    joinedMeeting?.meetingId
-  }
-
-  onLeave={() => {
-    setShowMeeting(false);
-    setJoinedMeeting(null);
-  }}
-
-/>
-
+      <MeetingPage
+        socket={socket}
+        user={user}
+        meetingId={joinedMeeting?.meetingId}
+        cameraReminderMinutes={joinedMeeting?.cameraReminderMinutes}
+        onLeave={() => {
+          setShowMeeting(false);
+          setJoinedMeeting(null);
+        }}
+      />
     );
 
   }
@@ -1279,90 +905,15 @@ async function copyMeetingCode(meetingId) {
   // ===================================================
 
   return (
-
-    <div className="app">
-
-
-      {/* HEADER */}
-
-      <header>
-
-        <div>
-
-          <h1>
-            Smart Live Meeting
-          </h1>
-
-
-          <span className="muted">
-
-            Participant ·{" "}
-
-            {user.name}
-
-          </span>
-
-        </div>
-
-
-        <button
-          onClick={logout}
-        >
-          Logout
-        </button>
-
-      </header>
-
-
-      {/* DASHBOARD */}
-
-      <main className="dashboard">
-
-        <div className="dashboard-card">
-
-          <h2>
-            Welcome, {user.name}
-          </h2>
-
-
-          <p>
-            You are logged in as a
-            participant.
-          </p>
-
-
-          <label>
-  Meeting Code
-</label>
-
-<input
-  type="text"
-  placeholder="Enter meeting code"
-  value={meetingCode}
-  onChange={(event) =>
-    setMeetingCode(
-      event.target.value.toUpperCase()
-    )
-  }
-/>
-
-<button
-  className="primary"
-  onClick={handleJoinMeeting}
-  disabled={joiningMeeting}
->
-  {joiningMeeting
-    ? "Joining..."
-    : "Join Meeting"}
-</button>
-
-        </div>
-
-      </main>
-
-
-    </div>
-
+    <Dashboard
+      user={user}
+      meetingCode={meetingCode}
+      pendingMeeting={pendingMeeting}
+      setMeetingCode={setMeetingCode}
+      handleJoinMeeting={handleJoinMeeting}
+      joiningMeeting={joiningMeeting}
+      logout={logout}
+    />
   );
 
 }

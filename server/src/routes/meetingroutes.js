@@ -1,38 +1,31 @@
 import express from "express";
-
 import {
   createMeeting,
   getAdminMeetings,
-  getMeeting,
+  joinMeeting,
+  getMeetingAccess,
+  updateParticipantApproval,
   startMeeting,
   endMeeting,
-  joinMeeting
+  saveChat,
+  saveSummary
 } from "../controllers/meetingController.js";
+import { requireAdmin } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
 router.post("/", createMeeting);
-
 router.get("/admin", getAdminMeetings);
-
-router.post(
-  "/:meetingId/start",
-  startMeeting
+router.post("/:code/join", joinMeeting);
+router.get("/:meetingId/access", getMeetingAccess);
+router.patch(
+  "/:meetingId/participants/:participantId/approval",
+  requireAdmin,
+  updateParticipantApproval
 );
-
-router.post(
-  "/:meetingId/end",
-  endMeeting
-);
-
-router.get(
-  "/:meetingId",
-  getMeeting
-);
-
-router.post(
-  "/:meetingId/join",
-  joinMeeting
-);
+router.post("/:meetingId/start", requireAdmin, startMeeting);
+router.post("/:meetingId/end", endMeeting);
+router.post("/:meetingId/chat", saveChat);
+router.post("/:meetingId/summary", saveSummary);
 
 export default router;
